@@ -1,6 +1,8 @@
 import {
+  createPaginatedResponseSchema,
   LABELS_ENTRY_DELIMITER,
   LABELS_VALUE_DELIMITER,
+  PaginationQuerySchema,
   RouteId,
 } from "@shared";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
@@ -25,11 +27,9 @@ import {
   ApiError,
   BuiltInAgentConfigSchema,
   constructResponseSchema,
-  createPaginatedResponseSchema,
   createSortingQuerySchema,
   DeleteObjectResponseSchema,
   InsertAgentSchema,
-  PaginationQuerySchema,
   SelectAgentSchema,
   UpdateAgentSchemaBase,
   UuidIdSchema,
@@ -107,6 +107,7 @@ const agentRoutes: FastifyPluginAsyncZod = async (fastify) => {
               "createdAt",
               "toolsCount",
               "subagentsCount",
+              "knowledgeSourcesCount",
               "team",
             ] as const),
           ),
@@ -776,27 +777,6 @@ const agentRoutes: FastifyPluginAsyncZod = async (fastify) => {
         organizationId,
       );
       return reply.send({ defaultAgentId });
-    },
-  );
-
-  fastify.put(
-    "/api/members/default-agent",
-    {
-      schema: {
-        operationId: RouteId.UpdateMemberDefaultAgent,
-        description: "Update the current user's default agent",
-        tags: ["Members"],
-        body: z.object({ agentId: z.string().uuid() }),
-        response: constructResponseSchema(z.object({ success: z.boolean() })),
-      },
-    },
-    async ({ body, user, organizationId }, reply) => {
-      const agent = await AgentModel.findById(body.agentId, user.id, true);
-      if (!agent) {
-        throw new ApiError(404, "Agent not found");
-      }
-      await MemberModel.setDefaultAgent(user.id, organizationId, body.agentId);
-      return reply.send({ success: true });
     },
   );
 };

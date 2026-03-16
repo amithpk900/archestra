@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConnectorTypeIcon } from "@/app/knowledge/knowledge-bases/_parts/connector-icons";
 import { AgentBadge } from "@/components/agent-badge";
+import type { AgentIconVariant } from "@/components/agent-icon";
 import { AgentIconPicker } from "@/components/agent-icon-picker";
 import {
   type ProfileLabel,
@@ -100,6 +101,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  VisibilitySelector as SharedVisibilitySelector,
+  type VisibilityOption,
+} from "@/components/visibility-selector";
 import {
   useCreateProfile,
   useInternalAgents,
@@ -396,11 +401,7 @@ function AccessLevelSelector({
   hasNoAvailableTeams: boolean;
   showTeamRequired: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const scopeOptions = getScopeOptions(agentType);
-  const selected =
-    scopeOptions.find((o) => o.value === scope) ?? scopeOptions[0];
-
   const canShareWithTeams = isAdmin || isTeamAdmin;
 
   const isOptionDisabled = (value: string) => {
@@ -429,104 +430,23 @@ function AccessLevelSelector({
     return "";
   };
 
+  const options: VisibilityOption<AgentScope>[] = scopeOptions.map(
+    (option) => ({
+      ...option,
+      disabled: isOptionDisabled(option.value),
+      disabledReason: isOptionDisabled(option.value)
+        ? getDisabledReason(option.value)
+        : undefined,
+    }),
+  );
+
   return (
-    <div className="space-y-4">
-      {/* ACCESS LEVEL */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold">
-          Who can use this {agentTypeDisplayName[agentType] || "agent"}
-        </h3>
-
-        {expanded ? (
-          <div className="space-y-1.5">
-            {scopeOptions.map((option) => {
-              const Icon = option.icon;
-              const disabled = isOptionDisabled(option.value);
-              const isSelected = scope === option.value;
-              return (
-                <TooltipProvider key={option.value}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => {
-                          if (!disabled) {
-                            onScopeChange(option.value);
-                            setExpanded(false);
-                          }
-                        }}
-                        className={`w-full flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                          isSelected
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : disabled
-                              ? "opacity-50 cursor-not-allowed"
-                              : "hover:bg-muted/50 cursor-pointer"
-                        }`}
-                      >
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
-                            isSelected ? "bg-primary-foreground/20" : "bg-muted"
-                          }`}
-                        >
-                          <Icon className="h-4 w-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium">
-                            {option.label}
-                          </div>
-                          <div
-                            className={`text-xs ${
-                              isSelected
-                                ? "text-primary-foreground/70"
-                                : "text-muted-foreground"
-                            }`}
-                          >
-                            {option.description}
-                          </div>
-                        </div>
-                        <div
-                          className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
-                            isSelected
-                              ? "border-primary-foreground"
-                              : "border-muted-foreground/30"
-                          }`}
-                        >
-                          {isSelected && <CheckIcon className="h-2.5 w-2.5" />}
-                        </div>
-                      </button>
-                    </TooltipTrigger>
-                    {disabled && (
-                      <TooltipContent>
-                        {getDisabledReason(option.value)}
-                      </TooltipContent>
-                    )}
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="w-full flex items-center gap-3 rounded-lg border p-3 text-left hover:bg-muted/50 transition-colors cursor-pointer"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-              <selected.icon className="h-4 w-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium">{selected.label}</div>
-              <div className="text-xs text-muted-foreground">
-                {selected.description}
-              </div>
-            </div>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </button>
-        )}
-      </div>
-
-      {/* SHARE WITH — only shown for team-scoped */}
+    <SharedVisibilitySelector
+      heading={`Who can use this ${agentTypeDisplayName[agentType] || "agent"}`}
+      value={scope}
+      options={options}
+      onValueChange={onScopeChange}
+    >
       {scope === "team" && (
         <div className="space-y-2">
           <Label>Teams{showTeamRequired && " *"}</Label>
@@ -547,7 +467,7 @@ function AccessLevelSelector({
           />
         </div>
       )}
-    </div>
+    </SharedVisibilitySelector>
   );
 }
 
@@ -558,6 +478,7 @@ interface AgentDialogProps {
   agent?: Agent | null;
   /** Agent type: 'agent' for internal agents with prompts, 'profile' for external profiles */
   agentType?: AgentType;
+  defaultIconType?: AgentIconVariant;
   /** Callback when a new agent/profile is created (not called for updates) */
   onCreated?: (created: { id: string; name: string }) => void;
 }
@@ -567,6 +488,7 @@ export function AgentDialog({
   onOpenChange,
   agent,
   agentType = "profile",
+  defaultIconType = "agent",
   onCreated,
 }: AgentDialogProps) {
   const appName = useAppName();
@@ -580,12 +502,12 @@ export function AgentDialog({
   const incomingEmail = useFeature("incomingEmail");
   const { data: identityProviders = [] } = useIdentityProviders();
   const { data: knowledgeBasesData } = useKnowledgeBases();
-  const knowledgeBases = knowledgeBasesData?.data ?? [];
+  const knowledgeBases = knowledgeBasesData ?? [];
   const { data: connectorsData } = useConnectors();
-  const connectors = connectorsData?.data ?? [];
+  const connectors = connectorsData ?? [];
   const agentLlmApiKeyId = agent?.llmApiKeyId;
   const { data: availableApiKeys = [] } = useAvailableChatApiKeys({
-    includeKeyId: agentLlmApiKeyId,
+    includeKeyId: agentLlmApiKeyId ?? undefined,
   });
   const { modelsByProvider } = useModelsByProvider();
 
@@ -594,8 +516,10 @@ export function AgentDialog({
   const { data: teams } = useQuery({
     queryKey: ["teams"],
     queryFn: async () => {
-      const response = await archestraApiSdk.getTeams();
-      return response.data || [];
+      const response = await archestraApiSdk.getTeams({
+        query: { limit: 100, offset: 0 },
+      });
+      return response.data?.data ?? [];
     },
   });
   const resource = getResourceForAgentType(agentType);
@@ -1053,10 +977,7 @@ export function AgentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-5xl h-[90vh] flex flex-col overflow-y-auto"
-        onInteractOutside={(e) => e.preventDefault()}
-      >
+      <DialogContent className="max-w-5xl h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <div className="flex items-center justify-between pr-6">
             <DialogTitle className="flex items-center gap-2">
@@ -1098,8 +1019,11 @@ export function AgentDialog({
           )}
         </DialogHeader>
 
-        <DialogForm onSubmit={handleSave}>
-          <div className="py-4 space-y-4">
+        <DialogForm
+          className="flex min-h-0 flex-1 flex-col"
+          onSubmit={handleSave}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 pb-4 space-y-4">
             {agentType === "profile" && (
               <Alert variant="warning">
                 <AlertTriangle className="h-4 w-4" />
@@ -1116,7 +1040,11 @@ export function AgentDialog({
               {/* Name + Icon (hidden for built-in agents, shown in dialog title) */}
               {!isBuiltIn && (
                 <div className="space-y-4">
-                  <AgentIconPicker value={icon} onChange={setIcon} />
+                  <AgentIconPicker
+                    value={icon}
+                    onChange={setIcon}
+                    fallbackType={defaultIconType}
+                  />
                   <div className="space-y-2">
                     <Label htmlFor="agentName">Name *</Label>
                     <Input
@@ -1421,10 +1349,9 @@ export function AgentDialog({
                                     kb.id,
                                   );
                                   const connectorTypes = [
-                                    ...new Set(
+                                    ...new Set<string>(
                                       kb.connectors?.map(
-                                        (c: { connectorType: string }) =>
-                                          c.connectorType,
+                                        (c) => c.connectorType,
                                       ) ?? [],
                                     ),
                                   ];
@@ -2002,7 +1929,7 @@ export function AgentDialog({
             )}
           </div>
 
-          <DialogStickyFooter>
+          <DialogStickyFooter className="mt-0">
             <Button type="button" variant="outline" onClick={handleClose}>
               Cancel
             </Button>
