@@ -140,6 +140,18 @@ function renderPage() {
   );
 }
 
+function getEmbeddingModelTrigger() {
+  const modelTrigger = screen
+    .getAllByRole("combobox")
+    .find((el) => el.textContent?.includes("Select embedding model"));
+
+  if (!modelTrigger) {
+    throw new Error("Embedding model trigger not found");
+  }
+
+  return modelTrigger;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockOrganization = null;
@@ -294,12 +306,7 @@ describe("KnowledgeSettingsPage", () => {
       ];
       renderPage();
 
-      const modelTrigger = screen
-        .getAllByRole("combobox")
-        .find((el) => el.textContent?.includes("Select embedding model"));
-
-      expect(modelTrigger).toBeDefined();
-      await user.click(modelTrigger!);
+      await user.click(getEmbeddingModelTrigger());
 
       expect(
         screen.getAllByText("Best cost/quality ratio (1536 dims)").length,
@@ -325,12 +332,7 @@ describe("KnowledgeSettingsPage", () => {
       ];
       renderPage();
 
-      const modelTrigger = screen
-        .getAllByRole("combobox")
-        .find((el) => el.textContent?.includes("Select embedding model"));
-
-      expect(modelTrigger).toBeDefined();
-      await user.click(modelTrigger!);
+      await user.click(getEmbeddingModelTrigger());
       await user.type(
         screen.getByPlaceholderText("Search or type model name..."),
         "custom-embedding-model{enter}",
