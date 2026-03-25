@@ -9,7 +9,7 @@ import {
   SSO_DOMAIN,
   UI_BASE_URL,
 } from "../../consts";
-import { expect, type Page, test } from "../../fixtures";
+import { type Browser, expect, type Page, test } from "../../fixtures";
 import {
   clickButton,
   expectAuthenticated,
@@ -137,11 +137,30 @@ function getRoleMappingRuleRow(page: Page, index: number) {
   return page.getByTestId(getIdpRoleMappingRuleRowTestId(index));
 }
 
+function getIdentityProviderConfigId(
+  providerType: "Generic OIDC" | "Generic SAML",
+): string {
+  return providerType === "Generic OIDC" ? "generic-oidc" : "generic-saml";
+}
+
+async function openIdentityProviderDialog(
+  page: Page,
+  providerType: "Generic OIDC" | "Generic SAML",
+): Promise<void> {
+  const configId = getIdentityProviderConfigId(providerType);
+  const openButton = page.getByTestId(
+    `${E2eTestId.IdentityProviderOpenDialogButton}-${configId}`,
+  );
+  await openButton.waitFor({ state: "visible", timeout: 20000 });
+  await openButton.click();
+  await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+}
+
 /**
  * Delete an identity provider via the UI dialog.
  */
 async function deleteProviderViaDialog(page: Page): Promise<void> {
-  await clickButton({ page, options: { name: "Delete" } });
+  await page.getByTestId(E2eTestId.IdentityProviderDeleteButton).click();
   await expect(page.getByText(/Are you sure/i)).toBeVisible();
   await clickButton({ page, options: { name: "Delete", exact: true } });
   await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10000 });
@@ -169,42 +188,137 @@ async function deleteExistingProviderIfExists(
     page.getByRole("heading", { name: "Identity Providers" }),
   ).toBeVisible({ timeout: 15000 });
 
-  const providerCard = page.getByText(providerType, { exact: true });
-  // Wait for card to be visible and stable before clicking (increased timeout for CI)
-  await providerCard.waitFor({ state: "visible", timeout: 20000 });
-  await providerCard.click();
-  await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+  const createButton = page.getByTestId(E2eTestId.IdentityProviderCreateButton);
+  const updateButton = page.getByTestId(E2eTestId.IdentityProviderUpdateButton);
 
-  // Check if this is edit or create dialog by looking for Update Provider button
-  const updateButton = page.getByRole("button", { name: "Update Provider" });
-  const isEditDialog = await updateButton.isVisible().catch(() => false);
-
-  if (isEditDialog) {
-    // Delete existing provider first
-    await clickButton({ page, options: { name: "Delete" } });
-    await expect(page.getByText(/Are you sure/i)).toBeVisible({
-      timeout: 10000,
-    });
-    const confirmDeleteButton = page.getByRole("button", {
-      name: "Delete",
-      exact: true,
-    });
-    await confirmDeleteButton.waitFor({ state: "visible" });
-    await confirmDeleteButton.click();
-    await expect(page.getByRole("dialog")).not.toBeVisible({
-      timeout: 10000,
-    });
-
-    // Reload and wait for page to update
-    await page.reload();
+  // Multiple generic providers can exist in the local/CI test environment.
+  // Keep deleting any matching provider until the card opens a true create dialog.
+  await expect(async () => {
+    await page.goto(`${UI_BASE_URL}/settings/identity-providers`);
     await page.waitForLoadState("domcontentloaded");
+    await expect(
+      page.getByRole("heading", { name: "Identity Providers" }),
+    ).toBeVisible({ timeout: 10000 });
 
-    // Wait for card to be visible again after reload, then click to open create dialog
-    await providerCard.waitFor({ state: "visible" });
-    await providerCard.click();
-    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+    await openIdentityProviderDialog(page, providerType);
+
+    if (await createButton.isVisible().catch(() => false)) {
+      return;
+    }
+
+    await expect(updateButton).toBeVisible({ timeout: 5000 });
+    await deleteProviderViaDialog(page);
+    throw new Error(
+      `Deleted existing ${providerType}; retrying until create dialog is available`,
+    );
+  }).toPass({ timeout: 60_000, intervals: [1000, 2000, 5000] });
+}
+
+async function expectRolesPageAfterSsoLogin(
+  browser: Browser,
+  providerName: string,
+): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const ssoContext = await browser.newContext({
+      storageState: undefined,
+    });
+    const ssoPage = await ssoContext.newPage();
+
+    try {
+      await ssoPage.goto(`${UI_BASE_URL}/auth/sign-in`);
+      await ssoPage.waitForLoadState("domcontentloaded");
+
+      const ssoButton = ssoPage.getByRole("button", {
+        name: new RegExp(providerName, "i"),
+      });
+      await expect(ssoButton).toBeVisible({ timeout: 10000 });
+
+      await clickButton({
+        page: ssoPage,
+        options: { name: new RegExp(providerName, "i") },
+      });
+
+      const loginSucceeded = await loginViaKeycloak(ssoPage);
+      expect(loginSucceeded).toBe(true);
+
+      await expectAuthenticated(ssoPage, 15000);
+      await expectActiveSession(ssoPage);
+
+      await expect(async () => {
+        await ssoPage.goto(`${UI_BASE_URL}/settings/roles`);
+        await ssoPage.waitForLoadState("domcontentloaded");
+        await ssoPage.waitForLoadState("networkidle").catch(() => {});
+
+        await expect(ssoPage).toHaveURL(/\/settings\/roles/, { timeout: 5000 });
+        await expectActiveSession(ssoPage);
+        await expect(
+          ssoPage.getByTestId(E2eTestId.SidebarUserProfile),
+        ).toBeVisible({
+          timeout: 5000,
+        });
+        await expect(
+          ssoPage.getByRole("heading", { name: "Roles" }),
+        ).toBeVisible({
+          timeout: 10000,
+        });
+      }).toPass({ timeout: 30_000, intervals: [1000, 2000, 5000] });
+
+      await ssoContext.close();
+      return;
+    } catch (error) {
+      lastError = error;
+      console.log(
+        `OIDC login attempt ${attempt}/3 failed for ${providerName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      await ssoContext.close();
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
   }
-  // If not an edit dialog, it's already a create dialog - nothing to delete
+
+  throw lastError;
+}
+
+async function expectActiveSession(page: Page): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        return page.evaluate(async () => {
+          const response = await fetch("/api/auth/get-session", {
+            credentials: "include",
+            cache: "no-store",
+          });
+
+          if (!response.ok) {
+            return null;
+          }
+
+          const session = await response.json();
+
+          if (session?.user?.email) {
+            return session.user.email;
+          }
+
+          const sidebarEmail =
+            document
+              .querySelector('[data-testid="sidebar-user-profile"]')
+              ?.textContent?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ??
+            null;
+
+          return sidebarEmail;
+        });
+      },
+      {
+        timeout: 20_000,
+        intervals: [500, 1000, 2000, 5000],
+      },
+    )
+    .toBe(ADMIN_EMAIL);
 }
 
 test.describe("Identity Provider Team Sync E2E", () => {
@@ -264,7 +378,7 @@ test.describe("Identity Provider Team Sync E2E", () => {
     await page.waitForLoadState("domcontentloaded");
     await deleteExistingProviderIfExists(page, "Generic OIDC");
     await fillOidcProviderForm(page, providerName);
-    await clickButton({ page, options: { name: "Create Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderCreateButton).click();
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10000 });
 
     // STEP 2: Navigate to teams page and create a team
@@ -449,8 +563,7 @@ test.describe("Identity Provider Team Sync E2E", () => {
     // Delete the identity provider
     await goToPage(page, "/settings/identity-providers");
     await page.waitForLoadState("domcontentloaded");
-    await page.getByText("Generic OIDC", { exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await openIdentityProviderDialog(page, "Generic OIDC");
     await deleteProviderViaDialog(page);
   });
 });
@@ -472,7 +585,7 @@ test.describe("Identity Provider OIDC E2E Flow with Keycloak", () => {
 
     // STEP 2: Fill in OIDC provider form and submit
     await fillOidcProviderForm(page, providerName);
-    await clickButton({ page, options: { name: "Create Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderCreateButton).click();
 
     // Wait for dialog to close and provider to be created
     await expect(page.getByRole("dialog")).not.toBeVisible({
@@ -523,22 +636,20 @@ test.describe("Identity Provider OIDC E2E Flow with Keycloak", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // Click on Generic OIDC card to edit (our provider)
-    await page.getByText("Generic OIDC", { exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await openIdentityProviderDialog(page, "Generic OIDC");
 
     // Update the domain (use a subdomain to keep it valid for the same email domain)
     await page.getByLabel("Domain").clear();
     await page.getByLabel("Domain").fill(`updated.${SSO_DOMAIN}`);
 
     // Save changes
-    await clickButton({ page, options: { name: "Update Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderUpdateButton).click();
     await expect(page.getByRole("dialog")).not.toBeVisible({
       timeout: 10000,
     });
 
     // STEP 6: Delete the provider
-    await page.getByText("Generic OIDC", { exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await openIdentityProviderDialog(page, "Generic OIDC");
     await deleteProviderViaDialog(page);
 
     // STEP 7: Verify SSO button no longer appears on login page
@@ -577,7 +688,7 @@ test.describe("Identity Provider IdP Logout (RP-Initiated Logout)", () => {
     await ensureAdminAuthenticated(page);
     await deleteExistingProviderIfExists(page, "Generic OIDC");
     await fillOidcProviderForm(page, providerName);
-    await clickButton({ page, options: { name: "Create Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderCreateButton).click();
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10000 });
 
     // STEP 2: Login via SSO in a fresh context
@@ -642,8 +753,7 @@ test.describe("Identity Provider IdP Logout (RP-Initiated Logout)", () => {
     // STEP 5: Cleanup - delete the identity provider
     await goToPage(page, "/settings/identity-providers");
     await page.waitForLoadState("domcontentloaded");
-    await page.getByText("Generic OIDC", { exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await openIdentityProviderDialog(page, "Generic OIDC");
     await deleteProviderViaDialog(page);
   });
 });
@@ -667,7 +777,7 @@ test.describe("Identity Provider Role Mapping E2E", () => {
     // STEP 3: Configure Role Mapping with TWO rules
     // The first rule will NOT match (looks for a non-existent group)
     // The second rule WILL match (looks for archestra-admins group)
-    await page.getByText("Role Mapping (Optional)").click();
+    await page.getByTestId(E2eTestId.IdpRoleMappingAccordionTrigger).click();
 
     const addRuleButton = page.getByTestId(E2eTestId.IdpRoleMappingAddRule);
     await expect(addRuleButton).toBeVisible();
@@ -702,57 +812,20 @@ test.describe("Identity Provider Role Mapping E2E", () => {
     }
 
     // Submit the form
-    await clickButton({ page, options: { name: "Create Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderCreateButton).click();
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10000 });
 
     // STEP 4: Test SSO login with admin user (in archestra-admins group)
     // The first rule should NOT match, but the second rule SHOULD match
-    const ssoContext = await browser.newContext({
-      storageState: undefined,
-    });
-    const ssoPage = await ssoContext.newPage();
-
-    try {
-      await ssoPage.goto(`${UI_BASE_URL}/auth/sign-in`);
-      await ssoPage.waitForLoadState("domcontentloaded");
-
-      const ssoButton = ssoPage.getByRole("button", {
-        name: new RegExp(providerName, "i"),
-      });
-      await expect(ssoButton).toBeVisible({ timeout: 10000 });
-
-      await clickButton({
-        page: ssoPage,
-        options: { name: new RegExp(providerName, "i") },
-      });
-
-      const loginSucceeded = await loginViaKeycloak(ssoPage);
-      expect(loginSucceeded).toBe(true);
-
-      await expectAuthenticated(ssoPage, 15000);
-
-      // STEP 5: Verify the user has admin role (from second rule, not editor from first)
-      // The Roles settings page is only accessible to admins
-      await ssoPage.goto(`${UI_BASE_URL}/settings/roles`);
-      await ssoPage.waitForLoadState("domcontentloaded");
-      await expect(ssoPage).toHaveURL(/\/settings\/roles/, { timeout: 10000 });
-
-      // If user has admin role, they should see the Roles page
-      // If they got editor role (from rule 1) or member role (default), they would not see this
-      await expect(ssoPage.getByRole("heading", { name: "Roles" })).toBeVisible(
-        { timeout: 10000 },
-      );
-
-      // Success! The second rule matched and assigned admin role
-    } finally {
-      await ssoContext.close();
-    }
+    // STEP 5: Verify the user has admin role (from second rule, not editor from first)
+    // The OIDC callback can hit transient Keycloak connection errors in CI, so retry
+    // the whole fresh-context login flow before considering this a real failure.
+    await expectRolesPageAfterSsoLogin(browser, providerName);
 
     // STEP 6: Cleanup - delete the provider
     await goToPage(page, "/settings/identity-providers");
     await page.waitForLoadState("domcontentloaded");
-    await page.getByText("Generic OIDC", { exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await openIdentityProviderDialog(page, "Generic OIDC");
     await deleteProviderViaDialog(page);
   });
 
@@ -773,7 +846,7 @@ test.describe("Identity Provider Role Mapping E2E", () => {
 
     // STEP 2: Configure Role Mapping
     // Expand the Role Mapping accordion
-    await page.getByText("Role Mapping (Optional)").click();
+    await page.getByTestId(E2eTestId.IdpRoleMappingAccordionTrigger).click();
 
     // Wait for accordion to expand - look for the Add Rule button
     const addRuleButton = page.getByTestId(E2eTestId.IdpRoleMappingAddRule);
@@ -803,7 +876,7 @@ test.describe("Identity Provider Role Mapping E2E", () => {
     }
 
     // Submit the form
-    await clickButton({ page, options: { name: "Create Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderCreateButton).click();
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10000 });
 
     // STEP 3: Test SSO login with admin user (in archestra-admins group)
@@ -856,8 +929,7 @@ test.describe("Identity Provider Role Mapping E2E", () => {
     // STEP 4: Cleanup - delete the provider
     await goToPage(page, "/settings/identity-providers");
     await page.waitForLoadState("domcontentloaded");
-    await page.getByText("Generic OIDC", { exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await openIdentityProviderDialog(page, "Generic OIDC");
     await deleteProviderViaDialog(page);
   });
 });
@@ -927,7 +999,7 @@ test.describe("Identity Provider SAML E2E Flow with Keycloak", () => {
     await page.getByLabel("Last Name Attribute (Optional)").fill("lastName");
 
     // Submit the form
-    await clickButton({ page, options: { name: "Create Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderCreateButton).click();
 
     // Wait for dialog to close and provider to be created
     // Also wait for network to be idle to ensure the provider is fully created
@@ -982,25 +1054,19 @@ test.describe("Identity Provider SAML E2E Flow with Keycloak", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // Click on Generic SAML card to edit (our provider)
-    const samlCard = page.getByText("Generic SAML", { exact: true });
-    await samlCard.waitFor({ state: "visible" });
-    await samlCard.click();
-    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+    await openIdentityProviderDialog(page, "Generic SAML");
 
     // Update the domain (use a subdomain to keep it valid for the same email domain)
     await page.getByLabel("Domain").clear();
     await page.getByLabel("Domain").fill(`updated.${SSO_DOMAIN}`);
 
     // Save changes
-    await clickButton({ page, options: { name: "Update Provider" } });
+    await page.getByTestId(E2eTestId.IdentityProviderUpdateButton).click();
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10000 });
     await page.waitForLoadState("domcontentloaded");
 
     // STEP 6: Delete the provider
-    const samlCardForDelete = page.getByText("Generic SAML", { exact: true });
-    await samlCardForDelete.waitFor({ state: "visible" });
-    await samlCardForDelete.click();
-    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+    await openIdentityProviderDialog(page, "Generic SAML");
     await deleteProviderViaDialog(page);
     await page.waitForLoadState("domcontentloaded");
 

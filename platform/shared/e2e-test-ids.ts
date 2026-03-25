@@ -23,6 +23,12 @@ export const E2eTestId = {
   ManageCredentialsButton: "manage-credentials-button",
   ManageToolsButton: "manage-tools-button",
   ConfigureIdpTeamSyncButton: "configure-idp-team-sync-button",
+  IdentityProviderCard: "identity-provider-card",
+  IdentityProviderOpenDialogButton: "identity-provider-open-dialog-button",
+  IdentityProviderCreateButton: "identity-provider-create-button",
+  IdentityProviderUpdateButton: "identity-provider-update-button",
+  IdentityProviderDeleteButton: "identity-provider-delete-button",
+  IdpRoleMappingAccordionTrigger: "idp-role-mapping-accordion-trigger",
   IdpRoleMappingDefaultRole: "idp-role-mapping-default-role",
   IdpRoleMappingRuleRole: "idp-role-mapping-rule-role",
   IdpRoleMappingRuleTemplate: "idp-role-mapping-rule-template",
@@ -70,12 +76,22 @@ export const E2eTestId = {
   ChatApiKeyDefaultBadge: "chat-api-key-default-badge",
   BulkAssignChatApiKeysButton: "bulk-assign-chat-api-keys-button",
   BulkAssignChatApiKeysDialog: "bulk-assign-chat-api-keys-dialog",
+  VirtualKeysPage: "virtual-keys-page",
+  VirtualKeysTable: "virtual-keys-table",
+  AddVirtualKeyButton: "add-virtual-key-button",
+  VirtualKeyCreateDialog: "virtual-key-create-dialog",
+  VirtualKeyDeleteDialog: "virtual-key-delete-dialog",
+  VirtualKeyParentKeySelect: "virtual-key-parent-key-select",
+  VirtualKeyValue: "virtual-key-value",
   // Chat Prompt Input
   ChatFileUploadButton: "chat-file-upload-button",
   ChatDisabledFileUploadButton: "chat-disabled-file-upload-button",
+  ChatApiKeySelectorTrigger: "chat-api-key-selector-trigger",
+  ChatApiKeySelectorSearchInput: "chat-api-key-selector-search-input",
   // Chat Model Selector
   ChatModelSelectorTrigger: "chat-model-selector-trigger",
   ChatPromptTextarea: "chat-prompt-textarea",
+  QuickstartAddApiKeyButton: "quickstart-add-api-key-button",
   // MCP Logs
   McpLogsDialog: "mcp-logs-dialog",
   McpLogsContent: "mcp-logs-content",
@@ -89,4 +105,22 @@ export type E2eTestId = (typeof E2eTestId)[keyof typeof E2eTestId];
 
 export function getIdpRoleMappingRuleRowTestId(index: number): string {
   return `role-mapping-rule-${index}`;
+}
+
+export function getChatApiKeySelectorProviderGroupTestId(
+  provider: string,
+): string {
+  return `chat-api-key-selector-provider-${provider}`;
+}
+
+export function getChatApiKeySelectorOptionTestId(keyId: string): string {
+  return `chat-api-key-selector-option-${keyId}`;
+}
+
+export function getVirtualKeyRowTestId(keyName: string): string {
+  return `virtual-key-row-${keyName}`;
+}
+
+export function getDeleteVirtualKeyButtonTestId(keyName: string): string {
+  return `delete-virtual-key-button-${keyName}`;
 }
