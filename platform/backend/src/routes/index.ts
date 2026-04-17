@@ -29,6 +29,7 @@ export { default as optimizationRuleRoutes } from "./optimization-rule";
 export { default as organizationRoutes } from "./organization";
 export { default as organizationRoleRoutes } from "./organization-role";
 export { default as anthropicProxyRoutes } from "./proxy/routes/anthropic";
+export { default as unifiedProxyRoutes } from "./proxy/routes/unified";
 export { default as azureProxyRoutes } from "./proxy/routes/azure";
 export { default as bedrockProxyRoutes } from "./proxy/routes/bedrock";
 export { default as cerebrasProxyRoutes } from "./proxy/routes/cerebras";

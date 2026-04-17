@@ -270,6 +270,8 @@ export async function registerWorkerRoutes(fastify: FastifyInstanceWithZod) {
   fastify.register(routes.vllmProxyRoutes);
   fastify.register(routes.xaiProxyRoutes);
   fastify.register(routes.zhipuaiProxyRoutes);
+  // Unified Gateway — OpenAI-compatible, auto-routes by model field
+  fastify.register(routes.unifiedProxyRoutes);
   // MCP Gateway (tool listing + tool calls via JSON-RPC)
   fastify.register(routes.mcpGatewayRoutes);
 }

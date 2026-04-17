@@ -157,6 +157,12 @@ export const RouteId = {
   BulkUpsertDefaultCallPolicy: "bulkUpsertDefaultCallPolicy",
   BulkUpsertDefaultResultPolicy: "bulkUpsertDefaultResultPolicy",
 
+  // Proxy Routes - Unified Gateway (OpenAI-compatible, auto-routes by model)
+  UnifiedChatCompletionsWithDefaultAgent:
+    "unifiedChatCompletionsWithDefaultAgent",
+  UnifiedChatCompletionsWithAgent: "unifiedChatCompletionsWithAgent",
+  UnifiedListModels: "unifiedListModels",
+
   // Proxy Routes - OpenAI
   OpenAiChatCompletionsWithDefaultAgent:
     "openAiChatCompletionsWithDefaultAgent",
